@@ -3,31 +3,31 @@
 #  from acoular import __file__ as bpath, WNoiseGenerator, PointSource,\
 #  Mixer, WriteH5, TimeSamples, PowerSpectra
 
-from acoular import L_p, Calib, MicGeom, PowerSpectra, EigSpectra, \
-RectGrid, BeamformerBase, BeamformerEig, BeamformerOrth, BeamformerCleansc, \
-TimeSamples, MaskedTimeSamples, FiltFiltOctave, BeamformerTimeSq, TimeAverage, \
-TimeCache, BeamformerTime, TimePower, BeamformerCMF, \
-BeamformerCapon, BeamformerMusic, BeamformerDamas, BeamformerClean, \
-BeamformerFunctional, WriteH5
-from acoular.internal import digest
+#  from acoular import L_p, Calib, MicGeom, PowerSpectra, EigSpectra, \
+    #  RectGrid, BeamformerBase, BeamformerEig, BeamformerOrth, BeamformerCleansc, \
+    #  TimeSamples, MaskedTimeSamples, FiltFiltOctave, BeamformerTimeSq, TimeAverage, \
+    #  TimeCache, BeamformerTime, TimePower, BeamformerCMF, \
+    #  BeamformerCapon, BeamformerMusic, BeamformerDamas, BeamformerClean, \
+    #  BeamformerFunctional, WriteH5
+#  from acoular.internal import digest
 
-from traits.api import Float, Int, Property, Trait, Delegate, \
-cached_property, Tuple, HasPrivateTraits, CLong, File, Instance, Any, \
-on_trait_change, List, CArray
-from traitsui.api import View, Item
-from traitsui.menu import OKCancelButtons
-import tables
+#  from traits.api import Float, Int, Property, Trait, Delegate, \
+    #  cached_property, Tuple, HasPrivateTraits, CLong, File, Instance, Any, \
+    #  on_trait_change, List, CArray
+#  from traitsui.api import View, Item
+#  from traitsui.menu import OKCancelButtons
+#  import tables
 
-from os import path #  import acoular
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, Activation, Merge
+
+from os import path
 import traceback
 import numpy as np
-from numpy import array, sqrt, ones, empty, newaxis, uint32, arange, dot
 import matplotlib.pyplot as plt
 from pylab import figure, plot, subplot, show, imshow, colorbar, axis, title
 import h5py as h5
 
-from keras.models import Sequential
-from keras.layers import Dense, Dropout, Activation, Merge
 
 # Configurations
 configurations = ('simu', 'expr')
@@ -99,6 +99,7 @@ elif config == 'expr':
         scan_path = './archive_to_download/database/experiments/contrast_speckle/'
         scan_name = 'contrast_speckle_expe_scan.hdf5'
 
+'''
 # Time Sample Class
 class iTimeSamples( TimeSamples ):
     """
@@ -130,6 +131,7 @@ class iTimeSamples( TimeSamples ):
         # DEBUG
         self.sample_freq = FREQ_S
         (self.numsamples, self.numchannels) = self.data.shape
+'''
 
 
 # Data Class
@@ -222,31 +224,61 @@ class DataSet:
             plt.title(i+1)
         plt.show()
 
-def train(in_dim, out_dim, X_train, Y_train, X_test, Y_test):
-    model = Sequential()
-    model.add(Dense(100000, input_dim = in_dim, init='uniform'))
-    model.add(Activation('relu'))
-    model.add(Dropout(0.5))
+class ANN(object):
 
-    model.add(Dense(100000, init='uniform'))
-    model.add(Activation('relu'))
-    model.add(Dropout(0.5))
+    """Docstring for ANN. """
 
-    model.add(Dense(out_dim, init='uniform'))
-    model.add(Activation('softmax'))
+    def __init__(self, input, output):
+        """TODO: to be defined. """
+        in_real = input.data['real']
+        (i_dim_x, i_dim_y, i_dim_z) = in_real.shape
+        self.input_dim = i_dim_x*i_dim_y*i_dim_z
+        self.input_data = in_real.reshape(self.input_dim, 1)
+        print(self.input_dim)
 
-    model.compile(loss='categorical_crossentropy', optimizer='sgd',\
-            metrics=['accuracy'])
+        out_real = output.data['real']
+        (o_dim_x, o_dim_y, o_dim_z) = out_real.shape
+        self.output_dim = o_dim_x*o_dim_y*o_dim_z
+        self.output_data = out_real.reshape(self.output_dim, 1)
+        print(self.output_dim)
 
-    hist = model.fit(X_train, Y_train, nb_epoch=5, batch_size=32,\
-            validation_split=0.1, shuffle=True)
-    print(hist.history)
+        self.sp_in = ()
+        self.sp_out = ()
 
-    loss_and_metrics = model.evaluate(X_test, Y_test, batch_size=32)
+    def sample_data(self):
+        self.sp_in = self.input_data[1:100, :]
+        self.sp_out = self.output_data[1:100, :]
 
-    classes = model.predict_classes(X_test, batch_size=32)
+    def train(self):
+        model = Sequential()
+        model.add(Dense(200, input_dim = self.input_dim, init='uniform'))
+        model.add(Activation('relu'))
+        model.add(Dropout(0.25))
 
-    proba = model.predict_proba(X_test, batch_size=32)
+        model.add(Dense(200, init='uniform'))
+        model.add(Activation('relu'))
+        model.add(Dropout(0.25))
+
+        model.add(Dense(self.output_dim, init='uniform'))
+        model.add(Activation('softmax'))
+
+        model.compile(loss='categorical_crossentropy', optimizer='sgd',\
+                metrics=['accuracy'])
+
+        #  hist = model.fit(self.input_data, self.output_data, nb_epoch=50, \
+                         #  batch_size=64, validation_split=0.2, shuffle=True)
+        hist = model.fit(self.sp_in, self.sp_out, nb_epoch=50, \
+                         batch_size=64, validation_split=0.2, shuffle=True)
+        print(hist.history)
+        # TODO: save model
+
+    def predict(self, X_test, Y_test):
+
+        loss_and_metrics = model.evaluate(X_test, Y_test, batch_size=32)
+
+        #  classes = model.predict_classes(X_test, batch_size=32)
+
+        proba = model.predict_proba(X_test, batch_size=32)
 
 # TODO: remove
 def test_import():
@@ -269,21 +301,9 @@ def test_net():
     img_data = DataSet('reconstructed_image')
     img_data.import_data(imag_recon_path, imag_recon_name)
 
-    input_dim = rcv_data.data['real'].size
-    print input_dim
-    X_train = rcv_data.data['real'].reshape(1, -1)
 
-    output_dim = img_data.data['real'].size
-    print output_dim
-    Y_train = img_data.data['real'].reshape(1, -1)
-
-    X_test = rcv_data.data['imag'].reshape(1, -1)
-    print X_test.shape
-
-    Y_test = img_data.data['imag'].reshape(1, -1)
-    print Y_test.shape
-
-    #  train(input_dim, output_dim, X_train, Y_train, X_test, Y_test)
+    ann = ANN(rcv_data, img_data)
+    ann.train()
 
 def beamform_imaging():
     rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
@@ -336,6 +356,6 @@ def beamform_imaging():
 
 
 if __name__ == '__main__':
-    #  test_net()
+    test_net()
     #  test_import();
-    beamform_imaging()
+    #  beamform_imaging()
