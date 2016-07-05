@@ -18,12 +18,14 @@
 #  from traitsui.menu import OKCancelButtons
 #  import tables
 
-from keras.models import Sequential
+from keras.models import Sequential, model_from_json, model_from_yaml
 from keras.layers import Dense, Dropout, Activation, Merge
+from keras.callbacks import EarlyStopping
 
 from os import path
 import traceback
 import numpy as np
+from scipy import signal
 import matplotlib.pyplot as plt
 from pylab import figure, plot, subplot, show, imshow, colorbar, axis, title
 import h5py as h5
@@ -148,6 +150,7 @@ class DataSet:
         self.fm = 0
         self.c0 = 0
         self.num_chn = 0
+        self.csm = ()
 
         self.scan = {}
 
@@ -162,6 +165,7 @@ class DataSet:
     def import_data(self, file_path, file_name):
         # TODO
         # try:
+        assert path.exists(file_path+file_name), 'File not found.'
         with h5.File(file_path + file_name, 'r') as hf:
             print('This %s dataset contains: ' % file_name)
             hf.visit(self.__print_name)
@@ -199,6 +203,20 @@ class DataSet:
         # except IOError, e:
                 # print(IOError, ':', e)
 
+    def preprocess(self):
+        # Cross spectral matrix
+        (_, num_channels, num_samples) = self.data['real'].shape
+        self.csm = np.zeros((num_channels, num_channels, 256), dtype=complex)
+        for i in np.arange(num_channels):
+            for j in np.arange(num_channels):
+                s1 = self.data['real'][1,i,:] + 1j*self.data['imag'][1,i,:]
+                s2 = self.data['real'][1,j,:] + 1j*self.data['imag'][1,j,:]
+                _, self.csm[i,j,:] = signal.csd(s1, s2, nperseg=256)
+
+        # Diagnal removal
+        #  diag_ind = (np.arange(num_channels), np.arange(num_channels))
+        #  self.csm[diag_ind, :] = 0 + 1j*0
+
     def write_data(self, filename, channel_id):
         with h5.File(filename, 'w') as hf:
             # DEBUG: complex value OR absolute value ??
@@ -223,6 +241,7 @@ class DataSet:
             plt.imshow(amp, extent=prange)
             plt.title(i+1)
         plt.show()
+
 
 class ANN(object):
 
@@ -253,13 +272,13 @@ class ANN(object):
         model = Sequential()
         model.add(Dense(200, input_dim = self.input_dim, init='uniform'))
         model.add(Activation('relu'))
-        model.add(Dropout(0.25))
+        #  model.add(Dropout(0.25))
 
-        model.add(Dense(200, init='uniform'))
+        model.add(Dense(200))#, init='uniform'))
         model.add(Activation('relu'))
-        model.add(Dropout(0.25))
+        #  model.add(Dropout(0.25))
 
-        model.add(Dense(self.output_dim, init='uniform'))
+        model.add(Dense(self.output_dim))#, init='uniform'))
         model.add(Activation('softmax'))
 
         model.compile(loss='categorical_crossentropy', optimizer='sgd',\
@@ -267,32 +286,54 @@ class ANN(object):
 
         #  hist = model.fit(self.input_data, self.output_data, nb_epoch=50, \
                          #  batch_size=64, validation_split=0.2, shuffle=True)
+        early_stop = EarlyStopping(monitor='val_loss', patience=2)
         hist = model.fit(self.sp_in, self.sp_out, nb_epoch=50, \
-                         batch_size=64, validation_split=0.2, shuffle=True)
+                         batch_size=64, validation_split=0.2, \
+                         shuffle=True, callbacks=[early_stop])
         print(hist.history)
-        # TODO: save model
+        #TODO: batch train
+        model.train_on_batch()
+
+        # Save model
+        model_to_save_json = model.to_json()
+        open('model_architecture.json', 'w').write(model_to_save_json)
+        model_to_save_yaml = model.to_yaml()
+        open('model_architecture.yaml', 'w').write(model_to_save_yaml)
+        model.save_weights('weights.h5')
 
     def predict(self, X_test, Y_test):
 
+        model = model_from_json(open('model_architecture.json').read())
+        model = model_from_yaml(open('model_architecture.yaml').read())
+        model.load_weights('weights.h5')
         loss_and_metrics = model.evaluate(X_test, Y_test, batch_size=32)
 
         #  classes = model.predict_classes(X_test, batch_size=32)
 
         proba = model.predict_proba(X_test, batch_size=32)
 
+    def get_interlayer_output(self, num_layer):
+        """TODO: Docstring for get_interlayer_output.
+        :returns: TODO
+
+        """
+        pass
+
+
 # TODO: remove
 def test_import():
     rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
     rcv_data.import_data(data_path, data_name)
+    rcv_data.preprocess()
 
-    sc_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'scan')
-    sc_data.import_data(scan_path, scan_name)
+    #  sc_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'scan')
+    #  sc_data.import_data(scan_path, scan_name)
 
-    img_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'reconstructed_image')
-    img_data.import_data(imag_recon_path, imag_recon_name)
+    #  img_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'reconstructed_image')
+    #  img_data.import_data(imag_recon_path, imag_recon_name)
 
-    pht_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'pht_data')
-    pht_data.import_data(phantom_path, phantom_name)
+    #  pht_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'pht_data')
+    #  pht_data.import_data(phantom_path, phantom_name)
 
 def test_net():
     rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
@@ -356,6 +397,6 @@ def beamform_imaging():
 
 
 if __name__ == '__main__':
-    test_net()
-    #  test_import();
+    #  test_net()
+    test_import();
     #  beamform_imaging()
