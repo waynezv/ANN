@@ -19,13 +19,15 @@
 #  import tables
 
 from keras.models import Sequential, model_from_json, model_from_yaml
-from keras.layers import Dense, Dropout, Activation, Merge
+from keras.layers import Dense, Dropout, Activation, Merge, Flatten, \
+    Convolution2D, MaxPooling2D
+from keras.optimizers import SGD
 from keras.callbacks import EarlyStopping
 
 from os import path
 import traceback
 import numpy as np
-from scipy import signal
+from scipy import signal, fft, ifft
 import matplotlib.pyplot as plt
 from pylab import figure, plot, subplot, show, imshow, colorbar, axis, title
 import h5py as h5
@@ -38,9 +40,10 @@ ftypes = ('iq', 'rf')
 
 config = configurations[0]
 metric = metrics[0]
-ftype  = ftypes[0]
+ftype  = ftypes[1]
 
-FREQ_S = 5208000.0
+#  FREQ_C = 5208000.0
+FREQ_S = 20832000.0
 
 # Import Settings
 if config == 'simu':
@@ -150,7 +153,8 @@ class DataSet:
         self.fm = 0
         self.c0 = 0
         self.num_chn = 0
-        self.csm = ()
+        self.csm = () # cross spectral matrix
+        self.csm_p = {} # cross spectral matrix splited in real and imag parts
 
         self.scan = {}
 
@@ -205,17 +209,30 @@ class DataSet:
 
     def preprocess(self):
         # Cross spectral matrix
-        (_, num_channels, num_samples) = self.data['real'].shape
-        self.csm = np.zeros((num_channels, num_channels, 256), dtype=complex)
-        for i in np.arange(num_channels):
-            for j in np.arange(num_channels):
-                s1 = self.data['real'][1,i,:] + 1j*self.data['imag'][1,i,:]
-                s2 = self.data['real'][1,j,:] + 1j*self.data['imag'][1,j,:]
-                _, self.csm[i,j,:] = signal.csd(s1, s2, nperseg=256)
+        (num_angles, num_channels, num_samples) = self.data['real'].shape
+        nFFT = 512
+        # (samples, channels, rows, cols)
+        self.csm = np.zeros((num_angles, nFFT, num_channels, num_channels), dtype=complex)
+        for k in np.arange(num_angles):
+            for i in np.arange(num_channels):
+                for j in np.arange(num_channels):
+                    s1 = self.data['real'][k,i,:] + 1j*self.data['imag'][k,i,:]
+                    s2 = self.data['real'][k,j,:] + 1j*self.data['imag'][k,j,:]
+                    _, self.csm[k,:,i,j] = signal.csd(s1, s2, fs=FREQ_S, nperseg=40, \
+                                    nfft=nFFT, scaling='density')
 
+        # TODO
         # Diagnal removal
         #  diag_ind = (np.arange(num_channels), np.arange(num_channels))
         #  self.csm[diag_ind, :] = 0 + 1j*0
+
+        # Lower triangle trim
+        # Normalize: /Gxx Gyy
+
+
+        print(self.csm.shape)
+        self.csm_p['real'] = self.csm.real
+        self.csm_p['imag'] = self.csm.imag
 
     def write_data(self, filename, channel_id):
         with h5.File(filename, 'w') as hf:
@@ -247,30 +264,31 @@ class ANN(object):
 
     """Docstring for ANN. """
 
-    def __init__(self, input, output):
-        """TODO: to be defined. """
-        in_real = input.data['real']
-        (i_dim_x, i_dim_y, i_dim_z) = in_real.shape
-        self.input_dim = i_dim_x*i_dim_y*i_dim_z
-        self.input_data = in_real.reshape(self.input_dim, 1)
-        print(self.input_dim)
+    def __init__(self):
+        self.in_real = ()
+        self.in_imag = ()
+        #  self.input_data = ()
 
-        out_real = output.data['real']
-        (o_dim_x, o_dim_y, o_dim_z) = out_real.shape
-        self.output_dim = o_dim_x*o_dim_y*o_dim_z
-        self.output_data = out_real.reshape(self.output_dim, 1)
-        print(self.output_dim)
+        self.out_real = ()
+        self.out_imag = ()
+        #  self.output_data = ()
 
-        self.sp_in = ()
-        self.sp_out = ()
+    def train_mlp(self, input, output):
+        self.in_real = input.data['real']
+        self.in_imag = input.data['imag']
+        self.out_real = output.data['real']
+        self.out_imag = output.data['imag']
 
-    def sample_data(self):
-        self.sp_in = self.input_data[1:100, :]
-        self.sp_out = self.output_data[1:100, :]
+        (i_dim_x, i_dim_y, i_dim_z) = self.in_real.shape
+        in_dim = i_dim_x*i_dim_y*i_dim_z
+        input_data = self.in_real.reshape(in_dim, 1)
 
-    def train(self):
+        (o_dim_x, o_dim_y, o_dim_z) = self.out_real.shape
+        out_dim = o_dim_x*o_dim_y*o_dim_z
+        output_data = self.out_real.reshape(out_dim, 1)
+
         model = Sequential()
-        model.add(Dense(200, input_dim = self.input_dim, init='uniform'))
+        model.add(Dense(200, input_dim=in_dim, init='uniform'))
         model.add(Activation('relu'))
         #  model.add(Dropout(0.25))
 
@@ -278,16 +296,14 @@ class ANN(object):
         model.add(Activation('relu'))
         #  model.add(Dropout(0.25))
 
-        model.add(Dense(self.output_dim))#, init='uniform'))
+        model.add(Dense(out_dim))#, init='uniform'))
         model.add(Activation('softmax'))
 
         model.compile(loss='categorical_crossentropy', optimizer='sgd',\
                 metrics=['accuracy'])
 
-        #  hist = model.fit(self.input_data, self.output_data, nb_epoch=50, \
-                         #  batch_size=64, validation_split=0.2, shuffle=True)
         early_stop = EarlyStopping(monitor='val_loss', patience=2)
-        hist = model.fit(self.sp_in, self.sp_out, nb_epoch=50, \
+        hist = model.fit(input_data, output_data, nb_epoch=50, \
                          batch_size=64, validation_split=0.2, \
                          shuffle=True, callbacks=[early_stop])
         print(hist.history)
@@ -300,6 +316,65 @@ class ANN(object):
         model_to_save_yaml = model.to_yaml()
         open('model_architecture.yaml', 'w').write(model_to_save_yaml)
         model.save_weights('weights.h5')
+
+    def train_cnn(self, input, output):
+        self.in_real = input.csm_p['real']
+        self.in_imag = input.csm_p['imag']
+        self.out_real = output.data['real']
+        self.out_imag = output.data['imag']
+
+        (num_samples, num_channels, num_rows, num_cols) = self.in_real.shape
+        (o_dim_x, o_dim_y, o_dim_z) = self.out_real.shape
+        out_dim = o_dim_x*o_dim_y*o_dim_z
+        out_data_r = self.out_real.reshape(out_dim, 1)
+        out_data_i = self.out_imag.reshape(out_dim, 1)
+
+        batch_size = 32
+        num_epoch = 200
+        num_filter = 64
+        num_row_kernel = 3
+        num_col_kernel = 3
+        num_pool = 2
+        dim_order = 'th' # (samples, channels, rows, cols)
+        model = Sequential()
+        model.add(Convolution2D(num_filter, num_row_kernel, num_col_kernel, \
+                                border_mode='same', dim_ordering=dim_order, \
+                                input_shape=(num_channels, num_rows, num_cols)))
+        model.add(Activation('relu'))
+        model.add(Convolution2D(num_filter, num_row_kernel, num_col_kernel))
+        model.add(Activation('relu'))
+        model.add(MaxPooling2D(pool_size=(num_pool, num_pool)))
+        model.add(Dropout(0.25))
+
+        model.add(Convolution2D(num_filter, num_row_kernel, num_col_kernel, \
+                                border_mode='same'))
+        model.add(Activation('relu'))
+        model.add(Convolution2D(num_filter, num_row_kernel, num_col_kernel))
+        model.add(Activation('relu'))
+        model.add(MaxPooling2D(pool_size=(num_pool, num_pool)))
+        model.add(Dropout(0.25))
+
+        model.add(Flatten())
+        model.add(Dense(512))
+        model.add(Activation('relu'))
+        model.add(Dropout(0.5))
+        model.add(Dense(out_dim))
+        model.add(Activation('softmax'))
+
+        sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+        model.compile(loss='categorical_crossentropy', \
+                      optimizer=sgd, metrics=['accuracy'])
+
+        early_stop = EarlyStopping(monitor='val_loss', patience=2)
+        hist_r = model.fit(self.in_real, out_data_r, \
+                  bash_size=batch_size, nb_epoch=num_epoch, verbose=1, \
+                  validation_split=0.2, shuffle=True, callbacks=[early_stop])
+        print(hist_r.history)
+
+        hist_i = model.fit(self.in_imag, out_data_i, \
+                  bash_size=batch_size, nb_epoch=num_epoch, verbose=1, \
+                  validation_split=0.2, shuffle=True, callbacks=[early_stop])
+        print(hist_i.history)
 
     def predict(self, X_test, Y_test):
 
@@ -338,13 +413,14 @@ def test_import():
 def test_net():
     rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
     rcv_data.import_data(data_path, data_name)
+    rcv_data.preprocess()
 
     img_data = DataSet('reconstructed_image')
     img_data.import_data(imag_recon_path, imag_recon_name)
 
-
-    ann = ANN(rcv_data, img_data)
-    ann.train()
+    ann = ANN()
+    #  ann.train_mlp(rcv_data, img_data)
+    ann.train_cnn(rcv_data, img_data)
 
 def beamform_imaging():
     rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
@@ -397,6 +473,6 @@ def beamform_imaging():
 
 
 if __name__ == '__main__':
-    #  test_net()
-    test_import();
+    test_net()
+    #  test_import();
     #  beamform_imaging()
