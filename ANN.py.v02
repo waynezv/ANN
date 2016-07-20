@@ -1,22 +1,22 @@
 #!/usr/bin/env python
 
-from acoular import __file__ as bpath, WNoiseGenerator, PointSource,\
-Mixer, WriteH5, TimeSamples, PowerSpectra
+#  from acoular import __file__ as bpath, WNoiseGenerator, PointSource,\
+#  Mixer, WriteH5, TimeSamples, PowerSpectra
 
-from acoular import L_p, Calib, MicGeom, PowerSpectra, EigSpectra, \
-    RectGrid, BeamformerBase, BeamformerEig, BeamformerOrth, BeamformerCleansc, \
-    TimeSamples, MaskedTimeSamples, FiltFiltOctave, BeamformerTimeSq, TimeAverage, \
-    TimeCache, BeamformerTime, TimePower, BeamformerCMF, \
-    BeamformerCapon, BeamformerMusic, BeamformerDamas, BeamformerClean, \
-    BeamformerFunctional, WriteH5
-from acoular.internal import digest
+#  from acoular import L_p, Calib, MicGeom, PowerSpectra, EigSpectra, \
+    #  RectGrid, BeamformerBase, BeamformerEig, BeamformerOrth, BeamformerCleansc, \
+    #  TimeSamples, MaskedTimeSamples, FiltFiltOctave, BeamformerTimeSq, TimeAverage, \
+    #  TimeCache, BeamformerTime, TimePower, BeamformerCMF, \
+    #  BeamformerCapon, BeamformerMusic, BeamformerDamas, BeamformerClean, \
+    #  BeamformerFunctional, WriteH5
+#  from acoular.internal import digest
 
-from traits.api import Float, Int, Property, Trait, Delegate, \
-    cached_property, Tuple, HasPrivateTraits, CLong, File, Instance, Any, \
-    on_trait_change, List, CArray
-from traitsui.api import View, Item
-from traitsui.menu import OKCancelButtons
-import tables
+#  from traits.api import Float, Int, Property, Trait, Delegate, \
+    #  cached_property, Tuple, HasPrivateTraits, CLong, File, Instance, Any, \
+    #  on_trait_change, List, CArray
+#  from traitsui.api import View, Item
+#  from traitsui.menu import OKCancelButtons
+#  import tables
 
 from keras.models import Sequential, model_from_json, model_from_yaml
 from keras.layers import Dense, Dropout, Activation, Merge, Flatten, \
@@ -107,6 +107,7 @@ elif config == 'expr':
         scan_path = './archive_to_download/database/experiments/contrast_speckle/'
         scan_name = 'contrast_speckle_expe_scan.hdf5'
 
+'''
 # Time Sample Class
 class iTimeSamples( TimeSamples ):
     """
@@ -138,19 +139,19 @@ class iTimeSamples( TimeSamples ):
         # DEBUG
         self.sample_freq = FREQ_S
         (self.numsamples, self.numchannels) = self.data.shape
+'''
 
 
 # Data Class
 class DataSet:
-    #  data = {}
+    #  data = {} # storing the data
     #  scan = {}
 
     def __init__(self, name):
         # TODO: better initialize
         self.name = name
-        self.data = {} # storing the data
+        self.data = {}
         self.probe_geom = ()
-        self.angles = ()
         self.fs = 0
         self.fm = 0
         self.c0 = 0
@@ -159,7 +160,6 @@ class DataSet:
         self.csm_p = {} # cross spectral matrix splited in real and imag parts
 
         self.scan = {}
-        self.dist = ()
 
         self.pht_pos = ()
 
@@ -183,8 +183,6 @@ class DataSet:
             # for received data
             if 'probe_geometry' in hf_group.keys():
                 self.probe_geom = np.array(hf_group['probe_geometry'])
-            if 'angles' in hf_group.keys():
-                self.angles = np.array(hf_group['angles'])
             if 'sampling_frequency' in hf_group.keys():
                 self.fs = np.array(hf_group['sampling_frequency'])
             if 'modulation_frequency' in hf_group.keys():
@@ -196,10 +194,9 @@ class DataSet:
                 self.data['imag'] = np.array(hf_group['data/imag'])
 
             # for scan data
-            if 'x_axis' in hf_group.keys():
-                self.scan['x_axis'] = np.array(hf_group['x_axis'])
-            if 'z_axis' in hf_group.keys():
-                self.scan['z_axis'] = np.array(hf_group['z_axis'])
+            if 'scan' in hf_group.keys():
+                self.scan['x_axis'] = np.array(hf_group['scan/x_axis'])
+                self.scan['z_axis'] = np.array(hf_group['scan/z_axis'])
 
             # for phantom data
             if 'phantom_xPts' in hf_group.keys():
@@ -215,40 +212,27 @@ class DataSet:
 
     def preprocess(self):
         # Cross spectral matrix
-        mode = 1 # 0: without average, of shape (num_angles, nFFT, num_channels, num_channels)
-                 # 1: with average, of shape (num_angles, num_channels, num_channels)
-
         (num_angles, num_channels, num_samples) = self.data['real'].shape
-        nFFT = 128
-        if mode == 0:
-            # (samples, channels, rows, cols)
-            self.csm = np.zeros((num_angles, nFFT, num_channels, num_channels), dtype=complex)
-            for k in np.arange(num_angles):
-                for i in np.arange(num_channels):
+        nFFT = 64
+        # (samples, channels, rows, cols)
+        self.csm = np.zeros((num_angles, nFFT, num_channels, num_channels), dtype=complex)
+        for k in np.arange(num_angles):
+            for i in np.arange(num_channels):
+                for j in np.arange(num_channels):
                     s1 = self.data['real'][k,i,:] + 1j*self.data['imag'][k,i,:]
-                    for j in np.arange(num_channels):
-                        if j==i:
-                            self.csm[k,:,i,j] = 0 + 1j*0
-                        else:
-                            s2 = self.data['real'][k,j,:] + 1j*self.data['imag'][k,j,:]
-                            _, self.csm[k,:,i,j] = signal.csd(s1, s2, fs=FREQ_S, nperseg=nFFT, \
-                                            nfft=nFFT, scaling='density')
-        # TODO
-        # Diagnal removal: use a better algorithm
-        # lambda filter map reduce
+                    s2 = self.data['real'][k,j,:] + 1j*self.data['imag'][k,j,:]
+                    _, self.csm[k,:,i,j] = signal.csd(s1, s2, fs=FREQ_S, nperseg=40, \
+                                    nfft=nFFT, scaling='density')
 
-        elif mode == 1:
-            self.csm = np.zeros((num_angles, num_channels, num_channels), dtype=complex)
-            for k in np.arange(num_angles):
-                for i in np.arange(num_channels):
-                    s1 = self.data['real'][k,i,:] + 1j*self.data['imag'][k,i,:]
-                    for j in np.arange(num_channels):
-                        if j==i:
-                            self.csm[k,i,j] = 0 + 1j*0
-                        else:
-                            s2 = self.data['real'][k,j,:] + 1j*self.data['imag'][k,j,:]
-                            _, tmp = signal.csd(s1, s2, fs=FREQ_S, nperseg=nFFT, nfft=nFFT, scaling='density')
-                            self.csm[k,i,j] = np.sum(tmp) / nFFT
+        # TODO
+        # Diagnal removal
+        #  diag_ind = (np.arange(num_channels), np.arange(num_channels))
+        #  self.csm[diag_ind, :] = 0 + 1j*0
+        for k in np.arange(num_angles):
+            for i in np.arange(num_channels):
+                for j in np.arange(num_channels):
+                    if i == j:
+                        self.csm[k,:,i,j] = 0 + 1j*0
 
         # Lower triangle trim
         # Normalize: /Gxx Gyy
@@ -256,28 +240,18 @@ class DataSet:
         self.csm_p['real'] = self.csm.real
         self.csm_p['imag'] = self.csm.imag
 
-    def compute_dist(self):
-        # Distance matrix
-        num_x = len(self.scan['x_axis'])
-        num_z = len(self.scan['z_axis'])
-        self.dist = np.zeros((num_x, num_z), dtype=float)
-        for i in range(num_x):
-            for j in range(num_z):
-                self.dist[i,j] = np.sqrt(self.scan['x_axis'][i]**2 \
-                        + self.scan['z_axis'][j]**2)
-
     def write_data(self, filename, channel_id):
         with h5.File(filename, 'w') as hf:
             # DEBUG: complex value OR absolute value ??
             (num_angles, num_channels, num_samples) = self.data['real'].shape
             one_ch_data = np.sqrt(self.data['real'][channel_id, :, :]**2 \
                     + self.data['imag'][channel_id, :, :]**2)
-            hf['time_data'] = one_ch_data.T
-
             #  mul_ch_data = np.sqrt( \
                     #  self.data['real'].reshape(num_angles*num_channels, num_samples)**2 \
                     #  + self.data['imag'].reshape(num_angles*num_channels, num_samples)**2 \
                     #  )
+
+            hf['time_data'] = one_ch_data.T
             #  hf['time_data'] = mul_ch_data.T
 
 
@@ -304,9 +278,11 @@ class ANN(object):
     def __init__(self):
         self.in_real = ()
         self.in_imag = ()
+        #  self.input_data = ()
 
         self.out_real = ()
         self.out_imag = ()
+        #  self.output_data = ()
 
     def train_mlp(self, input, output):
         self.in_real = input.data['real']
@@ -353,15 +329,25 @@ class ANN(object):
         model.save_weights('weights.h5')
 
     def train_cnn(self, input, output):
-        in_data_r = input['real']
-        in_data_i = input['imag']
-        num_samples, num_channels, num_rows, num_cols = in_data_r.shape
+        self.in_real = input.csm_p['real']
+        self.in_imag = input.csm_p['imag']
 
-        out_data_r = output['real']
-        out_data_i = output['imag']
-        out_dim = len(out_data_r)
+#  self.out_real = output.data['real'][3,:,:]
+#  self.out_imag = output.data['imag'][3,:,:]
+        amp = np.sqrt(output.data['real'][3, :, :]**2 + output.data['imag'][3, :, :]**2)
+        amp_fft = fft(amp)
+        self.out_real = img_norm(amp_fft.real)
+        self.out_imag = img_norm(amp_fft.imag)
 
-        # Configurations
+        (num_samples, num_channels, num_rows, num_cols) = self.in_real.shape
+        (o_dim_y, o_dim_z) = self.out_real.shape
+        out_dim = o_dim_y*o_dim_z
+
+        out_data_r = self.out_real.reshape(1, out_dim)
+        out_data_i = self.out_imag.reshape(1, out_dim)
+        out_data_r = matlib.repmat(out_data_r, num_samples, 1)
+        out_data_i = matlib.repmat(out_data_i, num_samples, 1)
+
         batch_size = 64
         num_epoch = 50
         num_filter = 32
@@ -369,8 +355,6 @@ class ANN(object):
         num_col_kernel = 3
         num_pool = 2
         dim_order = 'th' # (samples, channels, rows, cols)
-
-        # Net structure
         model = Sequential()
         model.add(Convolution2D(num_filter, num_row_kernel, num_col_kernel, \
                                 border_mode='same', dim_ordering=dim_order, \
@@ -411,43 +395,51 @@ class ANN(object):
         model.add(PReLU())
         model.add(Dropout(0.5))
         model.add(Dense(out_dim))
+        #  model.add(Activation('softmax'))
 
-        # Compile
-        #  sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+        sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
         model.compile(loss='mean_squared_error', \
                 optimizer='adam')
 #categorical_crossentropy', \
 
         early_stop = EarlyStopping(monitor='val_loss', patience=2)
-        hist_r = model.fit(in_data_r, out_data_r, \
+        hist_r = model.fit(self.in_real, out_data_r, \
                   batch_size=batch_size, nb_epoch=num_epoch, verbose=1, \
                   validation_split=0.1, shuffle=True, \
                   callbacks=[early_stop])
         print(hist_r.history)
 
-        hist_i = model.fit(in_data_i, out_data_i, \
+        hist_i = model.fit(self.in_imag, out_data_i, \
                   batch_size=batch_size, nb_epoch=num_epoch, verbose=1, \
                   validation_split=0.1, shuffle=True, \
                   callbacks=[early_stop])
         print(hist_i.history)
 
-        # TODO: move Prediction to a seperated func
         # Prediction
-        predict_r = model.predict(in_data_r, batch_size=batch_size)
-        rmse_r = np.sqrt(((predict_r-out_data_r)**2).mean(axis=0))
+        out_data_r_p = model.predict(self.in_real, batch_size=batch_size)
+        rmse_r = np.sqrt(((out_data_r_p-out_data_r)**2).mean(axis=0))
         print("rmse_r = ")
         print(rmse_r)
-        predict_i = model.predict(in_data_i, batch_size=batch_size)
-        rmse_i = np.sqrt(((predict_i-out_data_i)**2).mean(axis=0))
+        out_data_i_p = model.predict(self.in_imag, batch_size=batch_size)
+        rmse_i = np.sqrt(((out_data_i_p-out_data_i)**2).mean(axis=0))
         print("rmse_i = ")
         print(rmse_i)
 
+        #  out_data_r_p = model.predict(self.in_real, batch_size=batch_size)
+        #  out_data_i_p = model.predict(self.in_imag, batch_size=batch_size)
+
+        amp_pr = out_data_r_p[0].reshape(o_dim_y, o_dim_z)
+        amp_pi = out_data_i_p[0].reshape(o_dim_y, o_dim_z)
+        amp = np.sqrt(amp_pr**2 + amp_pi**2)
+        amp = ifft(amp)
+        amp = np.abs(amp)
+
+        plt.figure()
+        plt.imshow(amp, extent=(0,0.1,0,0.1))
+        plt.show()
+
         #  model.train_on_batch(self.in_real, out_data_r)
         #  model.train_on_batch(self.in_imag, out_data_i)
-
-        # TODO: save model
-        prediction = {'real': predict_r, 'imag': predict_i}
-        return prediction
 
     def predict(self, X_test, Y_test):
 
@@ -456,7 +448,7 @@ class ANN(object):
         model.load_weights('weights.h5')
         loss_and_metrics = model.evaluate(X_test, Y_test, batch_size=32)
 
-        classes = model.predict_classes(X_test, batch_size=32)
+        #  classes = model.predict_classes(X_test, batch_size=32)
 
         proba = model.predict_proba(X_test, batch_size=32)
 
@@ -468,69 +460,34 @@ class ANN(object):
         pass
 
 
+# TODO: remove
+def test_import():
+    rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
+    rcv_data.import_data(data_path, data_name)
+    #  rcv_data.preprocess()
+
+    #  sc_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'scan')
+    #  sc_data.import_data(scan_path, scan_name)
+
+    img_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'reconstructed_image')
+    img_data.import_data(imag_recon_path, imag_recon_name)
+    img_data.show_image((0,0.5,0,0.5))
+
+    #  pht_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'pht_data')
+    #  pht_data.import_data(phantom_path, phantom_name)
 
 def test_net():
-    # Import data
     rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
     rcv_data.import_data(data_path, data_name)
     rcv_data.preprocess()
-
-    sc_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'scan')
-    sc_data.import_data(scan_path, scan_name)
-    sc_data.compute_dist()
 
     img_data = DataSet('reconstructed_image')
     img_data.import_data(imag_recon_path, imag_recon_name)
     #  img_data.show_image((0,0.5,0,0.5))
 
-
-    # BUG: memory error
-    # Prepare inputs and outputs for net
-    # Input
-    num_chn, num_row, num_col = rcv_data.csm.shape
-    dist = sc_data.dist.reshape(-1,1)
-    num_samples = len(dist)
-
-    input_data = {'real': np.zeros((num_samples, num_chn, num_row, num_col), dtype=float), \
-            'imag': np.zeros((num_samples, num_chn, num_row, num_col), dtype=float)}
-
-    for i in range(num_samples):
-        tmp = rcv_data.csm * np.exp(1j*dist[i])
-        input_data['real'][i,:,:,:] = tmp.real
-        input_data['imag'][i,:,:,:] = tmp.imag
-    print(input_data['real'].shape)
-    print(input_data['imag'].shape)
-    print(input_data['real'])
-    print(input_data['imag'])
-
-    # Output
-    output_data = {'real': np.zeros((num_samples,1), dtype='float'), \
-            'imag': np.zeros((num_samples,1), dtype='float')}
-
-    amp = np.sqrt(img_data.data['real'][3, :, :]**2 + img_data.data['imag'][3, :, :]**2)
-    nx, ny = amp.shape
-    # NOTE: is fft needed here?
-    amp_fft = fft(amp)
-    out_r = img_norm(amp_fft.real) # normalization
-    out_i = img_norm(amp_fft.imag)
-    output_data['real'] = out_r.reshape(1,-1)
-    output_data['imag'] = out_i.reshape(1,-1)
-
-    # Train
     ann = ANN()
-    #  ann.train_mlp(rcv_data, img_data)
-    prediction = ann.train_cnn(input_data, output_data)
-
-    pr = prediction['real']
-    pi = prediction['imag']
-    # TODO: first abs or ifft?
-    sig_fft = pr + 1j*pi
-    sig = ifft(sig_fft)
-    amp = np.abs(sig)
-
-    plt.figure()
-    plt.imshow(amp, extent=(0,0.1,0,0.1))
-    plt.show()
+    #  #  ann.train_mlp(rcv_data, img_data)
+    ann.train_cnn(rcv_data, img_data)
 
 def beamform_imaging():
     rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
@@ -542,27 +499,32 @@ def beamform_imaging():
         rcv_data_name_id = rcv_data_name + str(i) + '.h5'
         rcv_data.write_data(rcv_data_name_id, i)
 
-    mg = MicGeom(from_file='rx_geom.xml')
-    rg = RectGrid(x_min=-0.8, x_max=-0.2, y_min=-0.1, y_max=0.3, z=0.8,\
-    increment=0.01)
-    t1 = iTimeSamples(name=rcv_data_name, numchannels=128)
-    #  cal = Calib(from_file='calibration_data.xml')
-    f1 = EigSpectra(time_data=t1, block_size=256, window="Hanning",\
-            overlap='75%')
-            #  calib=cal)
-    e1 = BeamformerBase(freq_data=f1, grid=rg, mpos=mg, r_diag=False)
-    # TODO: fr ?
-    fr = 700000
-    pm = e1.synthetic(fr, 0)
-    Lm = L_p(pm)
-    imshow( Lm.T, origin='lower', vmin=Lm.max()-10, extent=rg.extend(), \
-        interpolation='bicubic')
+    #  mg = MicGeom(from_file='rx_geom.xml')
+    #  rg = RectGrid(x_min=-0.8, x_max=-0.2, y_min=-0.1, y_max=0.3, z=0.8,\
+    #  increment=0.01)
+    #  t1 = iTimeSamples(name=rcv_data_name, numchannels=128)
+    #  #  cal = Calib(from_file='calibration_data.xml')
+    #  f1 = EigSpectra(time_data=t1, block_size=256, window="Hanning",\
+            #  overlap='75%')
+            #  #  calib=cal)
+    #  e1 = BeamformerBase(freq_data=f1, grid=rg, mpos=mg, r_diag=False)
+    #  # TODO: fr ?
+    #  fr = 100000
+    #  fr = 500000
+#  #    fr = 600000
+    #  fr = 700000
+#  #    fr = 800000
+#  #    fr = 900000
+    #  pm = e1.synthetic(fr, 0)
+    #  Lm = L_p(pm)
+    #  imshow( Lm.T, origin='lower', vmin=Lm.max()-10, extent=rg.extend(), \
+        #  interpolation='bicubic')
 
-    colorbar()
+    #  colorbar()
 
-    show()
+    #  show()
 
-    #  #  analyze the data and generate map
+# analyze the data and generate map
     #  ts = TimeSamples( name=h5savefile )
     #  ps = PowerSpectra( time_data=ts, block_size=128, window='Hanning' )
     #  rg = RectGrid( x_min=-0.2, x_max=0.2, y_min=-0.2, y_max=0.2, z=0.3, \
@@ -571,28 +533,13 @@ def beamform_imaging():
     #  pm = bb.synthetic( 8000, 3 )
     #  Lm = L_p( pm )
 
-    #  #  show map
+# show map
     #  imshow( Lm.T, origin='lower', vmin=Lm.max()-10, extent=rg.extend(), \
     #  interpolation='bicubic')
     #  colorbar()
 
-# TODO: remove
-def test_import():
-    rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
-    rcv_data.import_data(data_path, data_name)
-    #  rcv_data.preprocess()
-
-    sc_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'scan')
-    sc_data.import_data(scan_path, scan_name)
-
-    #  img_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'reconstructed_image')
-    #  img_data.import_data(imag_recon_path, imag_recon_name)
-
-    #  pht_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'pht_data')
-    #  pht_data.import_data(phantom_path, phantom_name)
-
 
 if __name__ == '__main__':
-    test_net()
-    #  test_import();
+    #  test_net()
+    test_import();
     #  beamform_imaging()
