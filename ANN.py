@@ -252,9 +252,15 @@ class DataSet:
                     self.csm[k,i,(i+1):num_channels] = self.csm[k,(i+1):num_channels,i]
         print(self.csm.shape)
         print(self.csm)
-        plt.figure()
-        plt.imshow(self.csm)
-        plt.show()
+
+        with h5.File('csm_h5', 'w') as hf:
+            hf['csm'] = self.csm
+
+        #  csm_t = self.csm[1,:,:]
+        #  img = csm_t.reshape(num_channels, num_channels)
+        #  plt.figure()
+        #  plt.imshow(img)
+        #  plt.show()
 
         # Lower triangle trim
         # Normalize: /Gxx Gyy
@@ -358,6 +364,8 @@ class ANN(object):
     def train_cnn(self, input, output):
         num_samples, num_channels, num_rows, num_cols = input.shape
         out_dim = len(output)
+        print(input)
+        print(output)
 
         # Configurations
         batch_size = 64
@@ -416,11 +424,11 @@ class ANN(object):
                 optimizer='adam')
 #categorical_crossentropy', \
 
-        early_stop = EarlyStopping(monitor='val_loss', patience=2)
+        #  early_stop = EarlyStopping(monitor='val_loss', patience=2)
         hist = model.fit(input, output, \
                   batch_size=batch_size, nb_epoch=num_epoch, verbose=1, \
-                  validation_split=0.1, shuffle=True, \
-                  callbacks=[early_stop])
+                  validation_split=0.1, shuffle=True)
+                  #  callbacks=[early_stop])
         print(hist.history)
 
         # TODO: move Prediction to a seperated func
@@ -466,7 +474,7 @@ def test_net():
     # Import data
     rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
     rcv_data.import_data(data_path, data_name)
-    rcv_data.preprocess()
+    #  rcv_data.preprocess()
 
     sc_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'scan')
     sc_data.import_data(scan_path, scan_name)
@@ -479,7 +487,16 @@ def test_net():
 
     # Prepare inputs and outputs for net
     # Input
-    num_chn, num_row, num_col = rcv_data.csm.shape
+    with h5.File('csm_h5', 'r') as hf:
+        csm = np.array(hf['csm'])
+
+    #  csm_t = csm[1,:,:]
+    #  img = csm_t.reshape(128,128)
+    #  plt.figure()
+    #  plt.imshow(img)
+    #  plt.show()
+
+    num_chn, num_row, num_col = csm.shape
     dist = sc_data.dist.reshape(-1,1)
     # num_samples = len(dist)
     num_samples = 1
@@ -490,25 +507,26 @@ def test_net():
     amp = np.sqrt(img_data.data['real'][3, :, :]**2 + img_data.data['imag'][3, :, :]**2)
     nx, ny = amp.shape
     amp = img_norm(amp) # normalization
-    amp = amp.reshape[-1,1]
+    amp = amp.reshape(-1,1)
 
     for i in range(num_samples):
         # NOTE: *dist or +dist
-        input_data[i,:,:,:] = rcv_data.csm * dist[i]
+        input_data[i,:,:,:] = csm * dist[i]
         output_data[i] = amp[num_samples]
-    print(input_data.shape)
-    print(input_data)
-    print(output_data.shape)
-    print(output_data)
 
     # Train
     ann = ANN()
     #  ann.train_mlp(rcv_data, img_data)
     amp_pr = ann.train_cnn(input_data, output_data)
 
-    plt.figure()
-    plt.imshow(amp_pr, extent=(0,0.1,0,0.1))
-    plt.show()
+    print('amp is ')
+    print(output_data)
+    print('amp_pr is ')
+    print(amp_pr)
+
+    #  plt.figure()
+    #  plt.imshow(amp_pr, extent=(0,0.1,0,0.1))
+    #  plt.show()
 
 '''
 def beamform_imaging():
@@ -573,6 +591,6 @@ def test_import():
 
 
 if __name__ == '__main__':
-    # test_net()
-    test_import();
+    test_net()
+    #  test_import();
     #  beamform_imaging()
