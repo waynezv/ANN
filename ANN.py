@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+'''
 from acoular import __file__ as bpath, WNoiseGenerator, PointSource,\
 Mixer, WriteH5, TimeSamples, PowerSpectra
 
@@ -17,6 +18,7 @@ from traits.api import Float, Int, Property, Trait, Delegate, \
 from traitsui.api import View, Item
 from traitsui.menu import OKCancelButtons
 import tables
+'''
 
 from keras.models import Sequential, model_from_json, model_from_yaml
 from keras.layers import Dense, Dropout, Activation, Merge, Flatten, \
@@ -43,10 +45,12 @@ ftypes = ('iq', 'rf')
 
 config = configurations[0]
 metric = metrics[0]
-ftype  = ftypes[1]
+ftype  = ftypes[1] # use RF data
 
-#  FREQ_C = 5208000.0
-FREQ_S = 20832000.0
+if ftype == 'iq':
+    FREQ_C = 5208000.0 # carrier frequency for IQ data
+elif ftype == 'rf':
+    FREQ_S = 20832000.0
 
 # Import Settings
 if config == 'simu':
@@ -72,7 +76,7 @@ if config == 'simu':
             data_name = 'contrast_speckle_simu_dataset_iq.hdf5' # iq data
             imag_recon_name = 'contrast_speckle_simu_img_from_iq.hdf5'
         elif ftype == 'rf':
-            data_name = 'contrast_speckle_simu_dataset_rf.hdf5' # if data
+            data_name = 'contrast_speckle_simu_dataset_rf.hdf5' # rf data
             imag_recon_name = 'contrast_speckle_simu_img_from_rf.hdf5'
 
         scan_path = './archive_to_download/database/simulation/contrast_speckle/'
@@ -101,12 +105,13 @@ elif config == 'expr':
             data_name = 'contrast_speckle_expe_dataset_iq.hdf5' # iq data
             imag_recon_name = 'contrast_speckle_expe_img_from_iq.hdf5'
         elif ftype == 'rf':
-            data_name = 'contrast_speckle_expe_dataset_rf.hdf5' # if data
+            data_name = 'contrast_speckle_expe_dataset_rf.hdf5' # rf data
             imag_recon_name = 'contrast_speckle_expe_img_from_rf.hdf5'
 
         scan_path = './archive_to_download/database/experiments/contrast_speckle/'
         scan_name = 'contrast_speckle_expe_scan.hdf5'
 
+'''
 # Time Sample Class
 class iTimeSamples( TimeSamples ):
     """
@@ -138,6 +143,7 @@ class iTimeSamples( TimeSamples ):
         # DEBUG
         self.sample_freq = FREQ_S
         (self.numsamples, self.numchannels) = self.data.shape
+'''
 
 
 # Data Class
@@ -156,7 +162,6 @@ class DataSet:
         self.c0 = 0
         self.num_chn = 0
         self.csm = () # cross spectral matrix
-        self.csm_p = {} # cross spectral matrix splited in real and imag parts
 
         self.scan = {}
         self.dist = ()
@@ -219,42 +224,40 @@ class DataSet:
                  # 1: with average, of shape (num_angles, num_channels, num_channels)
 
         (num_angles, num_channels, num_samples) = self.data['real'].shape
-        nFFT = 128
+        nFFT = 512 # 256
         if mode == 0:
             # (samples, channels, rows, cols)
             self.csm = np.zeros((num_angles, nFFT, num_channels, num_channels), dtype=complex)
             for k in np.arange(num_angles):
                 for i in np.arange(num_channels):
-                    s1 = self.data['real'][k,i,:] + 1j*self.data['imag'][k,i,:]
-                    for j in np.arange(num_channels):
-                        if j==i:
-                            self.csm[k,:,i,j] = 0 + 1j*0
-                        else:
-                            s2 = self.data['real'][k,j,:] + 1j*self.data['imag'][k,j,:]
-                            _, self.csm[k,:,i,j] = signal.csd(s1, s2, fs=FREQ_S, nperseg=nFFT, \
-                                            nfft=nFFT, scaling='density')
+                    s1 = sef.data['real'][k,i,:] # ignore imaginary part
+                    for j in np.arange(i+1,num_channels):
+                        s2 = self.data['real'][k,j,:]
+                        _, self.csm[k,:,j,i] = signal.csd(s1, s2, fs=FREQ_S, nperseg=nFFT, \
+                                        nfft=nFFT, scaling='density')
         # TODO
         # Diagnal removal: use a better algorithm
         # lambda filter map reduce
 
         elif mode == 1:
-            self.csm = np.zeros((num_angles, num_channels, num_channels), dtype=complex)
+            self.csm = np.zeros((num_angles, num_channels, num_channels), dtype=float)
             for k in np.arange(num_angles):
                 for i in np.arange(num_channels):
-                    s1 = self.data['real'][k,i,:] + 1j*self.data['imag'][k,i,:]
-                    for j in np.arange(num_channels):
-                        if j==i:
-                            self.csm[k,i,j] = 0 + 1j*0
-                        else:
-                            s2 = self.data['real'][k,j,:] + 1j*self.data['imag'][k,j,:]
-                            _, tmp = signal.csd(s1, s2, fs=FREQ_S, nperseg=nFFT, nfft=nFFT, scaling='density')
-                            self.csm[k,i,j] = np.sum(tmp) / nFFT
+                    s1 = self.data['real'][k,i,:]
+                    for j in np.arange(i+1,num_channels):
+                        s2 = self.data['real'][k,j,:]
+                        _, tmp = signal.csd(s1, s2, fs=FREQ_S, nperseg=nFFT, \
+                                nfft=nFFT, scaling='density')
+                        self.csm[k,j,i] = np.abs(np.sum(tmp) / nFFT) # sum,average,abs
+                    self.csm[k,i,(i+1):num_channels] = self.csm[k,(i+1):num_channels,i]
+        print(self.csm.shape)
+        print(self.csm)
+        plt.figure()
+        plt.imshow(self.csm)
+        plt.show()
 
         # Lower triangle trim
         # Normalize: /Gxx Gyy
-
-        self.csm_p['real'] = self.csm.real
-        self.csm_p['imag'] = self.csm.imag
 
     def compute_dist(self):
         # Distance matrix
@@ -353,13 +356,8 @@ class ANN(object):
         model.save_weights('weights.h5')
 
     def train_cnn(self, input, output):
-        in_data_r = input['real']
-        in_data_i = input['imag']
-        num_samples, num_channels, num_rows, num_cols = in_data_r.shape
-
-        out_data_r = output['real']
-        out_data_i = output['imag']
-        out_dim = len(out_data_r)
+        num_samples, num_channels, num_rows, num_cols = input.shape
+        out_dim = len(output)
 
         # Configurations
         batch_size = 64
@@ -419,35 +417,30 @@ class ANN(object):
 #categorical_crossentropy', \
 
         early_stop = EarlyStopping(monitor='val_loss', patience=2)
-        hist_r = model.fit(in_data_r, out_data_r, \
+        hist = model.fit(input, output, \
                   batch_size=batch_size, nb_epoch=num_epoch, verbose=1, \
                   validation_split=0.1, shuffle=True, \
                   callbacks=[early_stop])
-        print(hist_r.history)
-
-        hist_i = model.fit(in_data_i, out_data_i, \
-                  batch_size=batch_size, nb_epoch=num_epoch, verbose=1, \
-                  validation_split=0.1, shuffle=True, \
-                  callbacks=[early_stop])
-        print(hist_i.history)
+        print(hist.history)
 
         # TODO: move Prediction to a seperated func
         # Prediction
-        predict_r = model.predict(in_data_r, batch_size=batch_size)
-        rmse_r = np.sqrt(((predict_r-out_data_r)**2).mean(axis=0))
-        print("rmse_r = ")
-        print(rmse_r)
-        predict_i = model.predict(in_data_i, batch_size=batch_size)
-        rmse_i = np.sqrt(((predict_i-out_data_i)**2).mean(axis=0))
-        print("rmse_i = ")
-        print(rmse_i)
+        predict = model.predict(input, batch_size=batch_size)
+        rmse = np.sqrt(((predict-output)**2).mean(axis=0))
+        print("rmse = ")
+        print(rmse)
 
         #  model.train_on_batch(self.in_real, out_data_r)
         #  model.train_on_batch(self.in_imag, out_data_i)
 
         # TODO: save model
-        prediction = {'real': predict_r, 'imag': predict_i}
-        return prediction
+        #model_to_save_json = model.to_json()
+        #open('model_architecture.json', 'w').write(model_to_save_json)
+        #model_to_save_yaml = model.to_yaml()
+        #open('model_architecture.yaml', 'w').write(model_to_save_yaml)
+        #model.save_weights('weights.h5')
+
+        return predict
 
     def predict(self, X_test, Y_test):
 
@@ -484,54 +477,40 @@ def test_net():
     #  img_data.show_image((0,0.5,0,0.5))
 
 
-    # BUG: memory error
     # Prepare inputs and outputs for net
     # Input
     num_chn, num_row, num_col = rcv_data.csm.shape
     dist = sc_data.dist.reshape(-1,1)
-    num_samples = len(dist)
-
-    input_data = {'real': np.zeros((num_samples, num_chn, num_row, num_col), dtype=float), \
-            'imag': np.zeros((num_samples, num_chn, num_row, num_col), dtype=float)}
-
-    for i in range(num_samples):
-        tmp = rcv_data.csm * np.exp(1j*dist[i])
-        input_data['real'][i,:,:,:] = tmp.real
-        input_data['imag'][i,:,:,:] = tmp.imag
-    print(input_data['real'].shape)
-    print(input_data['imag'].shape)
-    print(input_data['real'])
-    print(input_data['imag'])
+    # num_samples = len(dist)
+    num_samples = 1
+    input_data = np.zeros((num_samples, num_chn, num_row, num_col), dtype=float)
 
     # Output
-    output_data = {'real': np.zeros((num_samples,1), dtype='float'), \
-            'imag': np.zeros((num_samples,1), dtype='float')}
-
+    output_data = np.zeros((num_samples,1), dtype='float')
     amp = np.sqrt(img_data.data['real'][3, :, :]**2 + img_data.data['imag'][3, :, :]**2)
     nx, ny = amp.shape
-    # NOTE: is fft needed here?
-    amp_fft = fft(amp)
-    out_r = img_norm(amp_fft.real) # normalization
-    out_i = img_norm(amp_fft.imag)
-    output_data['real'] = out_r.reshape(1,-1)
-    output_data['imag'] = out_i.reshape(1,-1)
+    amp = img_norm(amp) # normalization
+    amp = amp.reshape[-1,1]
+
+    for i in range(num_samples):
+        # NOTE: *dist or +dist
+        input_data[i,:,:,:] = rcv_data.csm * dist[i]
+        output_data[i] = amp[num_samples]
+    print(input_data.shape)
+    print(input_data)
+    print(output_data.shape)
+    print(output_data)
 
     # Train
     ann = ANN()
     #  ann.train_mlp(rcv_data, img_data)
-    prediction = ann.train_cnn(input_data, output_data)
-
-    pr = prediction['real']
-    pi = prediction['imag']
-    # TODO: first abs or ifft?
-    sig_fft = pr + 1j*pi
-    sig = ifft(sig_fft)
-    amp = np.abs(sig)
+    amp_pr = ann.train_cnn(input_data, output_data)
 
     plt.figure()
-    plt.imshow(amp, extent=(0,0.1,0,0.1))
+    plt.imshow(amp_pr, extent=(0,0.1,0,0.1))
     plt.show()
 
+'''
 def beamform_imaging():
     rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
     rcv_data.import_data(data_path, data_name)
@@ -575,12 +554,13 @@ def beamform_imaging():
     #  imshow( Lm.T, origin='lower', vmin=Lm.max()-10, extent=rg.extend(), \
     #  interpolation='bicubic')
     #  colorbar()
+'''
 
 # TODO: remove
 def test_import():
     rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
     rcv_data.import_data(data_path, data_name)
-    #  rcv_data.preprocess()
+    rcv_data.preprocess()
 
     sc_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'scan')
     sc_data.import_data(scan_path, scan_name)
@@ -593,6 +573,6 @@ def test_import():
 
 
 if __name__ == '__main__':
-    test_net()
-    #  test_import();
+    # test_net()
+    test_import();
     #  beamform_imaging()
