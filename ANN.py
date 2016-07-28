@@ -363,33 +363,35 @@ class ANN(object):
 
     def train_cnn(self, input, output):
         num_samples, num_channels, num_rows, num_cols = input.shape
-        out_dim = len(output)
-        print(input)
-        print(output)
+        # out_dim = len(output)
 
         # Configurations
-        batch_size = 64
-        num_epoch = 50
-        num_filter = 32
-        num_row_kernel = 3
-        num_col_kernel = 3
+        batch_size = 25 # note to adjust with the total number of samples
+        num_epoch = 100
+        num_filter = 100
+        num_row_kernel = 5
+        num_col_kernel = 5
         num_pool = 2
         dim_order = 'th' # (samples, channels, rows, cols)
 
         # Net structure
         model = Sequential()
+
         model.add(Convolution2D(num_filter, num_row_kernel, num_col_kernel, \
                                 border_mode='same', dim_ordering=dim_order, \
                                 input_shape=(num_channels, num_rows, num_cols)))
         #  model.add(BatchNormalization(mode=0, axis=1))
         #  model.add(Activation('relu'))
         model.add(PReLU())
+
+        # Normalize
         model.add(BatchNormalization(mode=0, axis=1))
+
         model.add(Convolution2D(num_filter, num_row_kernel, num_col_kernel))
         #  model.add(Activation('relu'))
         model.add(PReLU())
         model.add(MaxPooling2D(pool_size=(num_pool, num_pool)))
-        model.add(Dropout(0.25))
+#        model.add(Dropout(0.25))
 
         model.add(Convolution2D(num_filter, num_row_kernel, num_col_kernel, \
                                 border_mode='same'))
@@ -399,7 +401,7 @@ class ANN(object):
         #  model.add(Activation('relu'))
         model.add(PReLU())
         model.add(MaxPooling2D(pool_size=(num_pool, num_pool)))
-        model.add(Dropout(0.25))
+#        model.add(Dropout(0.25))
 
         model.add(Convolution2D(num_filter, num_row_kernel, num_col_kernel, \
                                 border_mode='same'))
@@ -409,14 +411,30 @@ class ANN(object):
         #  model.add(Activation('relu'))
         model.add(PReLU())
         model.add(MaxPooling2D(pool_size=(num_pool, num_pool)))
-        model.add(Dropout(0.25))
+#        model.add(Dropout(0.25))
 
         model.add(Flatten())
+
         model.add(Dense(512))
-        #  model.add(Activation('relu'))
+        model.add(PReLU())
+        model.add(Dropout(0.25))
+        model.add(Dense(256))
+        model.add(PReLU())
+        model.add(Dropout(0.3))
+        model.add(Dense(128))
+        model.add(PReLU())
+        model.add(Dropout(0.35))
+        model.add(Dense(64))
+        model.add(PReLU())
+        model.add(Dropout(0.4))
+        model.add(Dense(32))
         model.add(PReLU())
         model.add(Dropout(0.5))
-        model.add(Dense(out_dim))
+        model.add(Dense(32))
+        model.add(PReLU())
+        model.add(Dropout(0.5))
+
+        model.add(Dense(1)) # output 1 pixel
 
         # Compile
         #  sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
@@ -426,8 +444,8 @@ class ANN(object):
 
         #  early_stop = EarlyStopping(monitor='val_loss', patience=2)
         hist = model.fit(input, output, \
-                  batch_size=batch_size, nb_epoch=num_epoch, verbose=1, \
-                  validation_split=0.1, shuffle=True)
+                  batch_size=batch_size, nb_epoch=num_epoch, verbose=1)
+                  #  validation_split=0.1, shuffle=True)
                   #  callbacks=[early_stop])
         print(hist.history)
 
@@ -474,7 +492,7 @@ def test_net():
     # Import data
     rcv_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'data')
     rcv_data.import_data(data_path, data_name)
-    #  rcv_data.preprocess()
+#    rcv_data.preprocess()
 
     sc_data = DataSet(config+'_'+metric+'_'+ftype+'_'+'scan')
     sc_data.import_data(scan_path, scan_name)
@@ -486,7 +504,6 @@ def test_net():
 
 
     # Prepare inputs and outputs for net
-    # Input
     with h5.File('csm_h5', 'r') as hf:
         csm = np.array(hf['csm'])
 
@@ -496,23 +513,34 @@ def test_net():
     #  plt.imshow(img)
     #  plt.show()
 
+    # csm
     num_chn, num_row, num_col = csm.shape
-    dist = sc_data.dist.reshape(-1,1)
-    # num_samples = len(dist)
-    num_samples = 1
-    input_data = np.zeros((num_samples, num_chn, num_row, num_col), dtype=float)
 
-    # Output
-    output_data = np.zeros((num_samples,1), dtype='float')
+    # dist
+    dist = sc_data.dist.reshape(-1,1)
+    num_grid = dist.size
+
+    # image amp
     amp = np.sqrt(img_data.data['real'][3, :, :]**2 + img_data.data['imag'][3, :, :]**2)
+    assert sc_data.dist.shape==amp.shape, \
+            'Dist must have the same shape with Image'
     nx, ny = amp.shape
     amp = img_norm(amp) # normalization
     amp = amp.reshape(-1,1)
 
+    num_samples = 300
+    input_data = np.zeros((num_samples, num_chn, num_row, num_col), dtype=float)
+    output_data = np.zeros((num_samples,1), dtype='float')
+
+    sample_collection = np.arange(num_grid)
+    np.random.shuffle(sample_collection)
+    sample_indices = sample_collection[:num_samples]
+
     for i in range(num_samples):
+        ind = sample_indices[i]
         # NOTE: *dist or +dist
-        input_data[i,:,:,:] = csm * dist[i]
-        output_data[i] = amp[num_samples]
+        input_data[i,:,:,:] = csm * dist[ind]
+        output_data[i] = amp[ind]
 
     # Train
     ann = ANN()
