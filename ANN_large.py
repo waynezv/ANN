@@ -520,6 +520,38 @@ def test_import():
     #  plt.imshow(np.array(label_data['phantom_c'][99, 0])[:,:,0], extent=[0,0.1,0,0.1])
     #  plt.show()
 
+def test_results():
+    label_data_path = './'
+    label_data_name = 'animals_n100_26-Jul-2016.mat'
+    label_data = sio.loadmat(''.join([label_data_path,label_data_name]))['phantom_c']
+    print(label_data.shape)
+
+    plt.figure()
+    for i in range(10):
+        img = label_data[i,0][:,:,0]
+        #  print('img')
+        #  print(img)
+        plt.subplot(4,3,i+1)
+        plt.imshow(img)
+
+    with h5.File('images_pred_h5', 'r') as hf:
+        images = np.array(hf['images_pred'])
+    plt.figure()
+    for i in range(10):
+        img_t = images[i,:,:]
+        #  print('img_t')
+        #  print(img_t)
+        #  plt.figure()
+        #  plt.imshow(img_t)
+
+        vm = np.mean(img_t)
+        img_t[np.nonzero(img_t<vm)] = 0
+        img_t[np.nonzero(img_t>vm)] = 1
+        #  print(img_t)
+
+        plt.subplot(4,3,i+1)
+        plt.imshow(img_t)
+    plt.show()
 
 
     '''
@@ -600,4 +632,5 @@ def test_import():
 
 if __name__ == '__main__':
     #  test_import();
-    test_net()
+    #  test_net()
+    test_results()
