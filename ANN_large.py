@@ -208,7 +208,7 @@ class ANN(object):
 
         # Configurations
         batch_size = 25 # note to adjust with the total number of samples
-        num_epoch = 100
+        num_epoch = 50
         #  num_filter = 64
         num_row_kernel = 3
         num_col_kernel = 3
@@ -286,7 +286,6 @@ class ANN(object):
         model.add(Activation('relu'))
         model.add(Dropout(0.5))
         model.add(Dense(out_dim))
-        model.add(Activation('softmax'))
 
         '''
         # Net structure
@@ -353,10 +352,11 @@ class ANN(object):
         '''
 
         # Compile
-        sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-        model.compile(optimizer=sgd, loss='categorical_crossentropy')
-        #  model.compile(loss='mean_squared_error', \
-                #  optimizer='adam')
+        # sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+        # model.compile( optimizer=sgd, \
+                # loss='categorical_crossentropy' )
+        model.compile( optimizer='adam', \
+                loss='mean_squared_error' )
 
         #  early_stop = EarlyStopping(monitor='val_loss', patience=2)
         hist = model.fit(input, output, \
@@ -426,39 +426,37 @@ def test_net():
 
     label_data_path = './'
     label_data_name = 'animals_n100_26-Jul-2016.mat'
-    label_size = 128*128
+    label_size = 128
+    dct_size = 25
     label_data = sio.loadmat(''.join([label_data_path,label_data_name]))['phantom_c']
-    output_data = np.zeros((num_samples, label_size))
-    for i in range(1):
+    output_data = np.zeros((num_samples, dct_size**2))
+    for i in range(num_samples):
         img = label_data[i,0][:,:,0]
-        plt.figure()
-        plt.imshow(img)
+        # plt.figure()
+        # plt.imshow(img)
 
+# Get DCT Coeff
         dct_coeff = get_2D_dct(img)
-        print("img")
-        print(img)
+        # plt.matshow(np.abs(dct_coeff), cmap=plt.cm.Paired)
 
-        plt.matshow(np.abs(dct_coeff), cmap=plt.cm.Paired)
-
-        #  for ii in range(128):
-            #  dct_coeff_cp = dct_coeff.copy()
-            #  dct_coeff_cp[ii:,:] = 0
-            #  dct_coeff_cp[:,ii:] = 0
-        #  img_re = get_2D_idct(dct_coeff_cp)
-
+# Compress Coeff
         dct_coeff_cp = dct_coeff.copy()
-        v = np.mean(dct_coeff_cp) + 1.0*np.std(dct_coeff_cp)
-        ind = np.nonzero(dct_coeff_cp<v)
-        print
-        print("len ind")
-        print(len(np.array(ind).reshape(-1,1)))
-        print
-        dct_coeff_cp[ind] = 0.0
+        dct_coeff_cp[dct_size:,:] = 0.0
+        dct_coeff_cp[:,dct_size:] = 0.0
 
+        # Alternative
+        # v = np.mean(dct_coeff_cp) + 1.0*np.std(dct_coeff_cp)
+        # ind = np.nonzero(dct_coeff_cp<v)
+        # dct_coeff_cp[ind] = 0.0
+        # print("len ind")
+        # print(len(np.array(ind).ravel())
+
+        '''
+# Reconstruction
         img_re = get_2D_idct(dct_coeff_cp)
         img_m = np.mean(img_re)
-        ind_1 = np.nonzero(img_re > img_m)
-        ind_0 = np.nonzero(img_re < img_m)
+        ind_1 = np.nonzero(img_re>img_m)
+        ind_0 = np.nonzero(img_re<img_m)
         img_re[ind_1] = 1
         img_re[ind_0] = 0
         print("img_re")
@@ -466,16 +464,27 @@ def test_net():
         plt.figure()
         plt.imshow(img_re)#, cmap=plt.cm.gray)
         plt.show()
+        '''
 
-        dct_new = filter(lambda i:i>0.0, dct_coeff_cp.reshape(-1,1))
-        dct_new = np.array(dct_new)
-        print(dct_new.shape)
-        #  output_data[i,:] = label_data[i,0][:,:,0].reshape(-1,1)[:,0]
+        # dct_clip = np.array(filter(lambda x:x>0.0, dct_coeff_cp.reshape(-1,1)))
+        dct_clip = dct_coeff_cp[:dct_size,:dct_size].ravel()
+        output_data[i,:] = dct_clip
 
     # Train
-    #  ann = ANN()
-    #  amp_pr = ann.train_cnn(input_data, output_data)
-    #  amp_pr = amp_pr.reshape(num_samples, 128, 128)
+    ann = ANN()
+    pred = ann.train_cnn(input_data, output_data)
+    pred = pred.reshape(num_samples, dct_size, dct_size)
+
+    images_pred = []
+    for i in range(num_samples):
+        dct_pr = pred[i,:]
+        dct_pr_cp = np.zeros((label_size,label_size))
+        dct_pr_cp[:dct_size,:dct_size] = dct_pr.copy()
+        img_pr = get_2D_idct(dct_pr_cp)
+        images_pred.append(img_pr)
+    with h5.File('images_pred.h5', 'w') as hf:
+        hf['images_pred'] = images_pred
+
 
     #  print('amp_pr is ')
     #  print(amp_pr)
