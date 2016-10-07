@@ -19,11 +19,14 @@ from numpy import matlib
 from scipy import signal, fft, ifft
 from scipy.fftpack import dct, idct
 import scipy.io as sio
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from pylab import figure, plot, subplot, show, imshow, colorbar, axis, title
 from mpl_toolkits.axes_grid1 import make_axes_locatable, ImageGrid
 import h5py as h5
+import re
 
 # Data Class
 class DataSet:
@@ -235,112 +238,76 @@ class ANN(object):
         open('model_architecture.yaml', 'w').write(model_to_save_yaml)
         model.save_weights('weights.h5')
 
-    def train_cnn(self, input, output):
+    def train_cnn(self, input, output, test_input):
         num_samples, num_channels, num_rows, num_cols = input.shape
-        _, out_dim = output.shape
+        #output = output.reshape(num_samples,1,32,32)
+        output = 30*output.reshape(num_samples,32*32)
 
         # Configurations
-        batch_size = 30 # note to adjust with the total number of samples
-        num_epoch = 10
+        batch_size = 200
+        num_epoch = 1000
 
         model = Sequential()
-        model.add(ZeroPadding2D((1,1),input_shape=(num_channels, num_rows, num_cols)))
-        model.add(Convolution2D(64,3,3))
-        act1 = Activation('relu')
-        model.add(act1)
-        #  model.add(BatchNormalization(mode=0, axis=1))
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(64,3,3))
-        act2 = Activation('relu')
-        model.add(act2)
-        model.add(MaxPooling2D((2,2), strides=(2,2)))
-
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(128,3,3))
-        act3 = Activation('relu')
-        model.add(act3)
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(128,3,3))
-        act4 = Activation('relu')
-        model.add(act4)
-        model.add(MaxPooling2D((2,2), strides=(2,2)))
-
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(256,3,3))
-        act5 = Activation('relu')
-        model.add(act5)
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(256,3,3))
-        act6 = Activation('relu')
-        model.add(act6)
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(256,3,3))
-        act7 = Activation('relu')
-        model.add(act7)
-        model.add(MaxPooling2D((2,2), strides=(2,2)))
-
-        '''
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(512,3,3))
-        act8 = Activation('relu')
-        model.add(act8)
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(512,3,3))
-        act9 = Activation('relu')
-        model.add(act9)
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(512,3,3))
-        act10 = Activation('relu')
-        model.add(act10)
-        model.add(MaxPooling2D((2,2), strides=(2,2)))
-
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(512,3,3))
-        act11 = Activation('relu')
-        model.add(act11)
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(512,3,3))
-        act12 = Activation('relu')
-        model.add(act12)
-        model.add(ZeroPadding2D((1,1)))
-        model.add(Convolution2D(512,3,3))
-        act13 = Activation('relu')
-        model.add(act13)
-        model.add(MaxPooling2D((2,2), strides=(2,2)))
-        '''
-
+        model.add(ZeroPadding2D((1,1), \
+                input_shape=(num_channels,num_rows,num_cols)))
+        model.add(Convolution2D(1024,4,4, \
+                subsample=(2,2), \
+                activation='relu'))
+        model.add(ZeroPadding2D((2,2)))
+        model.add(Convolution2D(128,5,5, \
+                subsample=(1,1), \
+                activation='relu'))
+        model.add(ZeroPadding2D((2,2)))
+        model.add(Convolution2D(64,5,5, \
+                subsample=(1,1), \
+                activation='relu'))
+        model.add(ZeroPadding2D((2,2)))
+        model.add(Convolution2D(1,5,5, \
+                subsample=(1,1), \
+                activation='relu'))
         model.add(Flatten())
-        model.add(Dense(4096))
-        model.add(Activation('relu'))
-        model.add(Dropout(0.5))
-        model.add(Dense(4096))
-        model.add(Activation('relu'))
-        model.add(Dropout(0.5))
-        model.add(Dense(out_dim))
-
-        '''
-        # Net structure
-
-        '''
+        #model.add(BatchNormalization(mode=0, axis=1))
+        #model.add(Dropout(0.20))
+        model.add(Dense(256, \
+                activation='relu'))
+        model.add(Dense(32*32))
 
         # Compile
-        # sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
-        # model.compile( optimizer=sgd, \
-                # loss='categorical_crossentropy' )
-        model.compile( optimizer='adam', \
+        sgd = SGD(lr=0.01, decay=0.09, momentum=0.0, nesterov=False)
+        model.compile( optimizer='sgd', \
                 loss='mean_squared_error' )
 
-        #  early_stop = EarlyStopping(monitor='val_loss', patience=2)
+        #early_stop = EarlyStopping(monitor='val_loss', patience=2)
+        early_stop = EarlyStopping(monitor='loss', patience=4)
         hist = model.fit(input, output, \
                   batch_size=batch_size, nb_epoch=num_epoch, verbose=1, \
-                  validation_split=0.1, shuffle=True)
-                  #  callbacks=[early_stop])
-        print(hist.history)
+                  shuffle=True, \
+                  validation_split=0.1)
+                  #callbacks=[early_stop])
 
-        model.get_config()
-        #  kplt(model, to_file='model.png', show_shapes=True)
+        # TODO: move Prediction to a seperated func
+        # Prediction
+        eval = model.evaluate(input, output, batch_size=batch_size)
+        print('eval', eval)
+        #predict = model.predict(test_input, batch_size=batch_size)
+        predict = model.predict(input, batch_size=batch_size)
+        print('predict', predict)
+        #  rmse = np.sqrt(((predict-output)**2).mean(axis=0))
+        #  print("rmse = ")
+        #  print(rmse)
+
+        #  model.train_on_batch(self.in_real, out_data_r)
+        #  model.train_on_batch(self.in_imag, out_data_i)
+
+        # TODO: save model
+        #model_to_save_json = model.to_json()
+        #open('model_architecture.json', 'w').write(model_to_save_json)
+        #model_to_save_yaml = model.to_yaml()
+        #open('model_architecture.yaml', 'w').write(model_to_save_yaml)
+        #model.save_weights('weights.h5')
 
 # Visualization
+        '''
         I1 = input
         print("I1 shape: ", I1.shape)
         print('layer 0: ', model.layers[0].get_config())
@@ -363,69 +330,18 @@ class ANN(object):
         print("l2o shape: ", l2o.shape)
         print
 
-        l3f = T.function([model.layers[0].input], \
-                model.layers[3].output, allow_input_downcast=True)
-        l3o = np.array(l3f(I1))
-        print('layer 3: ', model.layers[3].get_config())
-        print("l3o shape: ", l3o.shape)
-
-        l4f = T.function([model.layers[0].input], \
-                model.layers[4].output, allow_input_downcast=True)
-        l4o = np.array(l4f(I1))
-        print('layer 4: ', model.layers[4].get_config())
-        print("l4o shape: ", l4o.shape)
-        l4w = np.squeeze(model.layers[4].W.get_value(borrow=True))
-        print("l4w shape: ", l4w.shape)
-
-        l5f = T.function([model.layers[1].input], \
-                act2.output, allow_input_downcast=True)
-        l5o = np.array(l5f(I1))
-        print('layer 5: ', model.layers[5].get_config())
-        print("l5o shape: ", l5o.shape)
-
-        l6f = T.function([model.layers[0].input], \
-                model.layers[6].output, allow_input_downcast=True)
-        l6o = np.array(l6f(I1))
-        print('layer 6: ', model.layers[6].get_config())
-        print("l6o shape: ", l6o.shape)
-
         f = plt.figure()
         plt.title('I1')
         nice_show(f,I1[0])
         f = plt.figure()
         plt.title('l1w')
-        nice_show(f,l1w)
+        nice_show(f,l1w[0])
         f = plt.figure()
         plt.title('l2o')
         nice_show(f,l2o[0])
 
-
-        f = plt.figure()
-        plt.title('l4w')
-        nice_show(f,l4w[0])
-        f = plt.figure()
-        plt.title('l5o')
-        nice_show(f,l5o[0])
-
-
         plt.show()
-
-        # TODO: move Prediction to a seperated func
-        # Prediction
-        predict = model.predict(input, batch_size=batch_size)
-        #  rmse = np.sqrt(((predict-output)**2).mean(axis=0))
-        #  print("rmse = ")
-        #  print(rmse)
-
-        #  model.train_on_batch(self.in_real, out_data_r)
-        #  model.train_on_batch(self.in_imag, out_data_i)
-
-        # TODO: save model
-        #model_to_save_json = model.to_json()
-        #open('model_architecture.json', 'w').write(model_to_save_json)
-        #model_to_save_yaml = model.to_yaml()
-        #open('model_architecture.yaml', 'w').write(model_to_save_yaml)
-        #model.save_weights('weights.h5')
+        '''
 
         return predict
 
@@ -456,25 +372,48 @@ def get_2D_idct(coeff):
     return idct(idct(coeff.T, norm='ortho').T, norm='ortho')
 
 def test_net():
-    num_samples = 86
-    num_channels = 1
-    num_rows = 66
-    num_cols = 66
+    num_channels = 66
+    num_rows = 64
+    num_cols = 64
     label_size = 32
     dct_size = 25
 
-    input_data = np.zeros((num_samples, num_channels, num_rows, num_cols))
-    with h5.File('input_h5', 'r') as hf:
-        input_data = np.array(hf['input_data'])
+    prefix = '/mingback/zhaowenbo'
+    input_name = 'input_h5_n2000_1600s'
+    output_name = 'outcat_h5_n2000_1600s'
+    test_input_name ='input_h5_n2000_82s'
+    test_output_name = 'output_h5_n2000_82s'
+    pat = re.compile('(\w+)(\_\w+)(\_\w+\_)(\d+)(\w+)')
+    mat = pat.split(input_name)
+    num_samples = int(mat[4])
+    print('num_samples', num_samples)
+    mat = pat.split(test_input_name)
+    num_tests = int(mat[4])
+    print('num_tests', num_tests)
 
-    with h5.File('output_h5', 'r') as hf:
-        output_data = np.array(hf['output_data'])
+    print('Preparing inputs ...')
+    with h5.File(path.join(prefix,input_name), 'r') as hf:
+        input_data = np.array(hf['input'])
+    print('Preparing outputs ...')
+    with h5.File(path.join(prefix,output_name), 'r') as hf:
+        output_data = np.array(hf['output'])
+    output_data = output_data.reshape(num_samples,label_size,label_size)
+
+    with h5.File(test_input_name, 'r') as hf:
+        test_input_data = np.array(hf['input'])
+    with h5.File(test_output_name, 'r') as hf:
+        test_output_data = np.array(hf['output'])
+    test_output_data = test_output_data.reshape(num_tests,label_size,label_size)
+
 
     # Train
     ann = ANN()
-    pred = ann.train_cnn(input_data, output_data)
-    pred = pred.reshape(num_samples, dct_size, dct_size)
+    pred = ann.train_cnn(input_data, output_data, \
+            test_input_data)
+    with h5.File('pred_resul_h5_v2', 'w') as hf:
+        hf['pred'] = pred
 
+    '''
     images_pred = []
     for i in range(num_samples):
         dct_pr = pred[i,:]
@@ -484,6 +423,7 @@ def test_net():
         images_pred.append(img_pr)
     with h5.File('images_pred.h5', 'w') as hf:
         hf['images_pred'] = images_pred
+    '''
 
     #  print('amp_pr is ')
     #  print(amp_pr)
@@ -493,42 +433,43 @@ def test_net():
     #  plt.show()
 
 def test_import():
-    num_samples = 86
+    num_samples = 82
     num_channels = 66
     num_rows = 64
     num_cols = 64
 
-    dataset_name = 'animals_n500_s32_30-Jul-2016'
+    dataset_name = 'animals_n2000_s32_30-Jul-2016'
 # Read Inputs
-    prefix = ''.join(['./sim_data_', dataset_name])
+    prefix = ''.join(['/home1/zhaowenbo/Field_II_ver_3_24_linux/gen_samples/sim_data_', \
+            dataset_name])
     input_data = np.zeros((num_samples, num_channels, num_rows, num_cols))
-    sam_id = 43
-    for sid in range(1):
-        ln_id = 100
-        for cid in range(1):
+    #sam_ls = list( set(range(1,122))-set([16,90]) )
+    sam_ls = range(1,83)
+    '''
+    for sid in range(num_samples):
+        sam_id = sam_ls[sid]
+        ln_id = 63
+        for cid in range(num_channels):
             inname = ''.join(['phant_',str(sam_id),'_rf_ln',str(ln_id),'.mat'])
             print('inname', inname)
             input_data[sid,cid,:,:] = sio.loadmat(path.join(prefix,inname))['csm']
             ln_id += 1
-        sam_id += 1
-    #  with h5.File('input_h5', 'w') as hf:
-        #  hf['input'] = input_data
-
-    f = plt.figure()
-    img = input_data[0,0,:,:].reshape(1,num_rows,num_cols)
-    nice_show(f,img)
-
-    plt.show()
+    with h5.File('input_h5_n2000_82s', 'w') as hf:
+        hf['input'] = input_data
+    '''
 
 # Read Outputs
-    label_data_path = './'
+    label_data_path = '/home1/zhaowenbo/Field_II_ver_3_24_linux/gen_samples/'
     label_data_name = ''.join([dataset_name, '.mat'])
     label_size = 32
     dct_size = 25
     label_data = sio.loadmat(''.join([label_data_path,label_data_name]))['phantom_c']
     output_data = np.zeros((num_samples, label_size**2))
+    '''
     for i in range(num_samples):
-        output_data[i,:] = label_data[i,0][:,:,0].ravel()
+        sam_ind = sam_ls[i]
+        print('sam_ind', sam_ind)
+        output_data[i,:] = label_data[sam_ind,0][:,:,0].ravel()
         img = label_data[i,0][:,:,0]
 # Get DCT Coeff
         dct_coeff = get_2D_dct(img)
@@ -537,13 +478,13 @@ def test_import():
         dct_coeff_cp = dct_coeff.copy()
         dct_coeff_cp[dct_size:,:] = 0.0
         dct_coeff_cp[:,dct_size:] = 0.0
-        # Alternative
+        # dct_clip = np.array(filter(lambda x:x>0.0, dct_coeff_cp.reshape(-1,1)))
+        dct_clip = dct_coeff_cp[:dct_size,:dct_size].ravel()
+    # Alternative
         # v = np.mean(dct_coeff_cp) + 1.0*np.std(dct_coeff_cp)
         # ind = np.nonzero(dct_coeff_cp<v)
         # dct_coeff_cp[ind] = 0.0
-        # print("len ind")
-        # print(len(np.array(ind).ravel())
-        '''
+        # print("len ind", len(np.array(ind).ravel()))
 # Reconstruction
         img_re = get_2D_idct(dct_coeff_cp)
         img_m = np.mean(img_re)
@@ -551,22 +492,41 @@ def test_import():
         ind_0 = np.nonzero(img_re<img_m)
         img_re[ind_1] = 1
         img_re[ind_0] = 0
-        print("img_re")
-        print(img_re)
-        plt.figure()
-        plt.imshow(img_re)#, cmap=plt.cm.gray)
-        plt.show()
         '''
-        # dct_clip = np.array(filter(lambda x:x>0.0, dct_coeff_cp.reshape(-1,1)))
-        dct_clip = dct_coeff_cp[:dct_size,:dct_size].ravel()
 
-    #  with h5.File('output_h5', 'w') as hf:
-        #  hf['output'] = output_data
+    #with h5.File('output_h5_n2000_82s', 'w') as hf:
+    #    hf['output'] = output_data
 
-    f = plt.figure()
-    nice_show(f, np.array(label_data[sam_id,0])[:,:,0].reshape(1,32,32))
-    plt.show()
+# Concatenate Files
+    with h5.File('input_h5_n1000_119s', 'r') as hf1:
+        input1 = np.array(hf1['input'])
+        print(input1.shape)
+    with h5.File('input_h5_n500_111s', 'r') as hf2:
+        input2 = np.array(hf2['input'])
+        print(input2.shape)
+    with h5.File('input_h5_n100_83s', 'r') as hf3:
+        input3 = np.array(hf3['input'])
+        print(input3.shape)
+    input_train = np.concatenate((input1, input2, input3))
+    print(input_train.shape)
 
+    with h5.File('input_h5_n1000_500_100_mixed_313s', 'w') as hf:
+        hf['input'] = input_train
+
+    with h5.File('output_h5_n1000_119s', 'r') as hf1:
+        output1 = np.array(hf1['output'])
+        print(output1.shape)
+    with h5.File('output_h5_n500_111s', 'r') as hf2:
+        output2 = np.array(hf2['output'])
+        print(output2.shape)
+    with h5.File('output_h5_n100_83s', 'r') as hf3:
+        output3 = np.array(hf3['output'])
+        print(output3.shape)
+    output_train = np.concatenate((output1, output2, output3))
+    print(output_train.shape)
+
+    with h5.File('output_h5_n1000_500_100_mixed_313s', 'w') as hf:
+        hf['output'] = output_train
 
 
 def test_results():
@@ -634,6 +594,6 @@ def test_results():
 
 
 if __name__ == '__main__':
-    test_import();
-    #  test_net()
+    # test_import();
+    test_net()
     #  test_results()
