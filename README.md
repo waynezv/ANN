@@ -1,5 +1,5 @@
 # ANN
-Acoustic Neural Networks for IUS 2016, PICMUS Challenge
+Acoustic Neural Networks
 ===
 
 This project intends to do end-to-end ultrasonic imaging using convolutional-deconvolutional networks.
